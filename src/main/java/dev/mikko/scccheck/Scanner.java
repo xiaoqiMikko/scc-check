@@ -72,13 +72,48 @@ public final class Scanner {
     }
 
     /** 扫构件:自身文件名 + 内嵌 lib + Maven 元数据。构件不会说谎,优先级最高。 */
+    /**
+     * ☠️ <b>ZipInputStream 对非 zip 内容不抛异常,只是一个条目都不给</b>(2026-09-08 实测)。
+     *
+     * <p>后果:损坏 / 加密 / 根本不是 zip 的 .jar 会静默走完扫描,得出「未发现」并返回退出码 0 ——
+     * 而那读起来就是「你不受影响」。<b>「读不动」和「你是安全的」必须是两句话。</b>
+     *
+     * <p>🔴 这个坑第 10 注(log4j-check)实测记过并在那一注加了防线,但后续各注的扫描代码
+     * 是从别处复制来的,<b>防线没跟着传下来</b>。空 zip({@code PK\05\06})合法,不算坏文件。
+     */
+    static boolean looksLikeZip(byte[] b) {
+        if (b == null || b.length < 4 || b[0] != 'P' || b[1] != 'K') return false;
+        int c = b[2], d = b[3];
+        return (c == 3 && d == 4) || (c == 5 && d == 6) || (c == 7 && d == 8);
+    }
+
+    /** 读前 4 个字节用于验魔数;读不满 4 字节也算不是 zip。 */
+    private static byte[] head4(Path p) throws IOException {
+        byte[] b = new byte[4];
+        try (InputStream in = Files.newInputStream(p)) {
+            int n = in.readNBytes(b, 0, 4);
+            return n == 4 ? b : new byte[0];
+        }
+    }
+
     private static void scanArchive(Path jar, List<Finding> out) throws IOException {
         matchJarName(jar.getFileName().toString()).ifPresent(v ->
                 out.add(new Finding(jar, null, Kind.SERVER, v, "jar 文件名")));
 
+        if (!looksLikeZip(head4(jar))) {
+            // 🔴 version = null 会走 Main 的 [判不了] 分支(退出码 1),正是这里需要的:
+            //    既不会被当成「发现了」,也不会被当成「这里很干净」。
+            out.add(new Finding(jar, null, Kind.SERVER, null,
+                    "读不动,不是有效的 zip/jar(截断、加密,或其实是个 HTML 错误页)"
+                            + " —— 🔴 这不等于「里面没有 Spring Cloud Config」"));
+            return;
+        }
+
+        int entries = 0;
         try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(jar))) {
             ZipEntry e;
             while ((e = zis.getNextEntry()) != null) {
+                entries++;
                 String n = e.getName();
 
                 // fat jar / war 内嵌依赖
@@ -105,6 +140,16 @@ public final class Scanner {
                     }
                 }
             }
+        }
+
+        // 🔴 第二层防线:魔数对、也没抛异常,但一个条目都没解出来。
+        //    ☠️ 2026-09-08 实测:魔数校验只挡住一半 —— PK 03 04 开头但**内容截断**的文件
+        //    魔数是对的、ZipInputStream 也不抛异常,只是零条目。
+        //    合法的空 zip 恰好是 22 字节(一条 EOCD 记录),那是真的空,不报。
+        if (entries == 0 && Files.size(jar) != 22) {
+            out.add(new Finding(jar, null, Kind.SERVER, null,
+                    "魔数像 zip,但一个条目都解不出来(多半是截断或下载不全)"
+                            + " —— 🔴 这不等于「里面没有 Spring Cloud Config」"));
         }
     }
 
