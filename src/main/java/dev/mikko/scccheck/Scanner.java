@@ -43,6 +43,18 @@ public final class Scanner {
      */
     public record Finding(Path source, String inner, Kind kind, String version, String note) { }
 
+    /** 「读不动」类 note 的前缀 —— 文案与判据同一个常量,措辞改了判据跟着改。 */
+    public static final String UNREADABLE_NOT_ZIP = "读不动,不是有效的 zip/jar";
+
+    /** 同上:魔数对但零条目。 */
+    public static final String UNREADABLE_TRUNCATED = "魔数像 zip,但一个条目都解不出来";
+
+    /** 这条 note 是不是「读不动」类 —— 调用方据它把退出码抬到 4。 */
+    public static boolean isUnreadable(String note) {
+        return note != null
+                && (note.startsWith(UNREADABLE_NOT_ZIP) || note.startsWith(UNREADABLE_TRUNCATED));
+    }
+
     private static final Pattern JAR_NAME =
             Pattern.compile("^(" + SERVER + ")-(\\d[\\w.\\-]*)\\.jar$");
     private static final Pattern POM_PROPS_VERSION =
@@ -104,7 +116,7 @@ public final class Scanner {
             // 🔴 version = null 会走 Main 的 [判不了] 分支(退出码 1),正是这里需要的:
             //    既不会被当成「发现了」,也不会被当成「这里很干净」。
             out.add(new Finding(jar, null, Kind.SERVER, null,
-                    "读不动,不是有效的 zip/jar(截断、加密,或其实是个 HTML 错误页)"
+                    UNREADABLE_NOT_ZIP + "(截断、加密,或其实是个 HTML 错误页)"
                             + " —— 🔴 这不等于「里面没有 Spring Cloud Config」"));
             return;
         }
@@ -148,7 +160,7 @@ public final class Scanner {
         //    合法的空 zip 恰好是 22 字节(一条 EOCD 记录),那是真的空,不报。
         if (entries == 0 && Files.size(jar) != 22) {
             out.add(new Finding(jar, null, Kind.SERVER, null,
-                    "魔数像 zip,但一个条目都解不出来(多半是截断或下载不全)"
+                    UNREADABLE_TRUNCATED + "(多半是截断或下载不全)"
                             + " —— 🔴 这不等于「里面没有 Spring Cloud Config」"));
         }
     }

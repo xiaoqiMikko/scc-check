@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class Main {
 
-    static final String VERSION = "0.1.1";
+    static final String VERSION = "0.1.2";
 
     /**
      * 全部输出走这里,以便控制字符编码。
@@ -33,6 +33,9 @@ public final class Main {
      * —— 这套做法沿用前三注,别重新发明。
      */
     private static PrintStream out = System.out;
+
+    /** 有文件读不动 —— 「我没能读它」不许在自动化里等于「通过」(2026-09-09 加)。 */
+    private static final int EXIT_UNREADABLE = 4;
 
     public static void main(String[] args) throws Exception {
         List<String> targets = new ArrayList<>();
@@ -76,6 +79,9 @@ public final class Main {
             return;
         }
 
+        // 🔴 读不动单独成一档:它不是「判不了」的一种,而是「我根本没能读」。
+        //    退出码 4 让 CI 分得出这两件事(2026-09-09)。
+        boolean unreadable = false;
         int worst = 0;
         for (Finding f : findings) {
             String where = f.source() + (f.inner() == null ? "" : " :: " + f.inner());
@@ -83,6 +89,11 @@ public final class Main {
             if (f.kind() == Kind.CLIENT) {
                 out.printf("[OK]       %s%n           客户端构件,**不受本 CVE 影响**(漏洞在服务端)。%n           来源: %s%n%n",
                         where, f.note());
+                continue;
+            }
+            if (f.version() == null && Scanner.isUnreadable(f.note())) {
+                out.printf("[读不动]   %s%n           %s%n%n", where, f.note());
+                unreadable = true;
                 continue;
             }
             if (f.version() == null) {
@@ -109,6 +120,9 @@ public final class Main {
         if (worst == 2) {
             out.println("[!] 存在「Maven Central 上没有修复版」的版本线 —— 官方修复版属 Enterprise Support。");
             printTable();
+        }
+        if (worst == 0 && unreadable) {
+            System.exit(EXIT_UNREADABLE);
         }
         System.exit(worst);
     }
