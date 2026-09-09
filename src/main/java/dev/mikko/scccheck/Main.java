@@ -22,7 +22,7 @@ import java.util.Map;
  */
 public final class Main {
 
-    static final String VERSION = "0.1.0";
+    static final String VERSION = "0.1.1";
 
     /**
      * 全部输出走这里,以便控制字符编码。
